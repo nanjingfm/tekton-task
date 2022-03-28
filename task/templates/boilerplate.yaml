@@ -1,0 +1,43 @@
+apiVersion: tekton.dev/v1beta1
+kind: {{ .Values.task.kind }}
+metadata:
+  name: boilerplate-check
+  namespace: {{ default "katanomi" .Values.task.namespace }}
+spec:
+  params:
+    - name: filetypes
+      type: string
+      default: "go,sh"
+      description: The extension of files that should match this boilerplate
+    - name: tools-image
+      description: "image used to run commands"
+      default: {{ .Values.task.image | quote }}
+  workspaces:
+    - description: The git repo will be cloned onto the volume backing this workspace
+      name: source
+  steps:
+    - name: check
+      image: $(params.tools-image)
+      script: |
+        #!/bin/bash
+        set -eu
+        cd $(workspaces.source.path)
+
+        filetypeOption=$(params.filetypes)
+        filetypes=(${filetypeOption//,/ })
+        errorCount=0
+
+        for filetype in ${filetypes[@]}; do
+          if [ -f ./hack/boilerplate.${filetype}.txt ]; then
+            echo "Running github.com/mattmoor/boilerplate-check for ${filetype} ..."
+            out=$(boilerplate-check check \
+              --boilerplate ./hack/boilerplate.${filetype}.txt \
+              --file-extension ${filetype})
+            if [ ! -z "$out" ]; then
+              echo "$out"
+              ((errorCount++))
+            fi
+          fi
+        done
+
+        if [ $errorCount -gt 0 ]; then exit 1; fi

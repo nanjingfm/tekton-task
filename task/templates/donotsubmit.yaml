@@ -1,0 +1,37 @@
+apiVersion: tekton.dev/v1beta1
+kind: {{ .Values.task.kind }}
+metadata:
+  name: donotsubmit-check
+  namespace: {{ default "katanomi" .Values.task.namespace }}
+spec:
+  params:
+    - name: tools-image
+      description: "image used to run commands"
+      default: {{ .Values.task.image | quote }}
+  workspaces:
+    - description: The git repo will be cloned onto the volume backing this workspace
+      name: source
+  steps:
+    - name: check
+      image: $(params.tools-image)
+      script: |
+        #!/bin/bash
+        set -u
+
+        cd $(workspaces.source.path)
+
+        set +e
+        out=$(find . -type f \
+          -not -path './vendor/*' \
+          -not -path './third_party/*' \
+          -not -path './.git/*' \
+          -not -path './.build/*' \
+          -not -path './.github/*' |
+        xargs grep -n "DO NOT SUBMIT")
+
+        if [ ! -z "$out" ]; then
+          echo "$out"
+          exit 1
+        fi
+
+        echo "Everything seems to be fine"

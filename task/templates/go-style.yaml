@@ -1,0 +1,54 @@
+apiVersion: tekton.dev/v1beta1
+kind: {{ .Values.task.kind }}
+metadata:
+  name: go-style-check
+  namespace: {{ default "katanomi" .Values.task.namespace }}
+spec:
+  params:
+    - name: tools-image
+      description: "image used to run commands"
+      default: {{ .Values.task.image | quote }}
+  workspaces:
+    - description: FIXME The git repo will be cloned onto the volume backing this workspace
+      name: source
+  steps:
+    - name: check
+      image: $(params.tools-image)
+      script: |
+        #!/bin/bash
+        set -eu
+        cd $(workspaces.source.path)
+
+        echo 'Running golangci-lint ...'
+        if [ -f .golangci.yaml ]; then
+          golangci-lint run
+        else
+          golangci-lint run ./...
+        fi
+
+        ALL_FIFLE=$(git ls-files |
+        git check-attr --stdin linguist-generated | grep -Ev ': (set|true)$' | cut -d: -f1 |
+        git check-attr --stdin linguist-vendored | grep -Ev ': (set|true)$' | cut -d: -f1 |
+        grep -Ev '^(vendor/|third_party/|.git)' |
+        grep -v '\.ai$')
+
+        echo 'Running github.com/client9/misspell ...'
+        # Don't fail because of misspell
+        echo $ALL_FIFLE |
+        xargs misspell -i importas -error
+
+        echo 'Running EOF newline check ...'
+        errorCount=0
+        for x in $ALL_FIFLE; do
+          # Based on https://stackoverflow.com/questions/34943632/linux-check-if-there-is-an-empty-line-at-the-end-of-a-file
+          if [[ -f $x && ! ( -s "$x" && -z "$(tail -c 1 $x)" ) ]]; then
+            ((errorCount++))
+            echo $x:$((1 + $(wc -l $x | tr -s ' ' | cut -d' ' -f 1))): Missing newline
+          fi
+        done
+
+        if [ "$errorCount" -gt 0 ]; then
+          exit 1
+        fi
+
+        echo "Everything seems to be fine"

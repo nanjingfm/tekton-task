@@ -1,0 +1,33 @@
+apiVersion: tekton.dev/v1beta1
+kind: {{ .Values.task.kind }}
+metadata:
+  name: gotest
+  namespace: {{ default "katanomi" .Values.task.namespace }}
+spec:
+  workspaces:
+    - description: The git repo will be cloned onto the volume backing this workspace
+      name: source
+  params:
+    - name: tools-image
+      description: "image used to run commands"
+      default: {{ .Values.task.image | quote }}
+  results:
+    - name: coverage
+      description: The coverage of test code
+  steps:
+    - name: check
+      image: $(params.tools-image)
+      env:
+        - name: GOPRIVATE
+          value: "github.com/katanomi/*"
+      script: |
+        #!/bin/bash
+        set -eu
+
+        cd $(workspaces.source.path)
+
+        go test -coverprofile cover.out ./...
+        go tool cover -func cover.out |
+        tail -n1 |
+        grep -P '\d+\.\d+' -o |
+        tee $(results.coverage.path)

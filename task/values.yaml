@@ -1,0 +1,5 @@
+task:
+  kind: ClusterTask
+  # Only valid when kind is task.
+  namespace: katanomi
+  image: go-builder:v0.0.11
