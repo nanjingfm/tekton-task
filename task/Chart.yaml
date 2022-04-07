@@ -1,5 +1,5 @@
 apiVersion: v2
-name: task
+name: katanomi-task
 description: Common tekton tasks for CI
 type: application
 version: 0.1.0

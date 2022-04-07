@@ -1,5 +1,6 @@
 task:
+  prefix: "katanomi-"
   kind: ClusterTask
-  # Only valid when kind is task.
   namespace: katanomi
-  image: go-builder:v0.0.11
+  image: registry.alauda.cn:60080/fundamentals/katanomi-ci-builder:v0.0.3
+  setupGoEnv: |

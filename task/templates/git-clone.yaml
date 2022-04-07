@@ -1,8 +1,10 @@
 apiVersion: tekton.dev/v1beta1
 kind: {{ .Values.task.kind }}
 metadata:
-  name: git-clone
+  name: {{ .Values.task.prefix }}git-clone
   namespace: {{ default "katanomi" .Values.task.namespace }}
+  annotations:
+    tekton.dev/categories: "Continuous Integration"
 spec:
   params:
     - description: git url to clone
@@ -38,11 +40,11 @@ spec:
     - description: The git repo will be cloned onto the volume backing this workspace
       name: source
   steps:
-    - name: clone
+    - name: clone-source-code
       image: $(params.tools-image)
       resources: { }
       script: |
-        #!/bin/sh
+        #!/bin/bash
         set -eu -o pipefail
         if [[ "$(params.verbose)" == "true" ]] ; then
           set -x

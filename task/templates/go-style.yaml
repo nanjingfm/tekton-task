@@ -1,54 +1,51 @@
 apiVersion: tekton.dev/v1beta1
 kind: {{ .Values.task.kind }}
 metadata:
-  name: go-style-check
+  name: {{ .Values.task.prefix }}go-style
   namespace: {{ default "katanomi" .Values.task.namespace }}
+  annotations:
+    tekton.dev/categories: "Continuous Integration"
+    tekton.dev/displayName: "Go Style"
 spec:
   params:
     - name: tools-image
       description: "image used to run commands"
       default: {{ .Values.task.image | quote }}
+    - name: verbose
+      default: "false"
+      description: log the commands used during execution
+      type: string
+    {{- include "reviewdog.params" . | nindent 4 }}
   workspaces:
-    - description: FIXME The git repo will be cloned onto the volume backing this workspace
+    - description: The workspace with source code
       name: source
   steps:
-    - name: check
+    - name: go-code-style-check
       image: $(params.tools-image)
       script: |
         #!/bin/bash
         set -eu
-        cd $(workspaces.source.path)
-
-        echo 'Running golangci-lint ...'
-        if [ -f .golangci.yaml ]; then
-          golangci-lint run
-        else
-          golangci-lint run ./...
+        if [[ "$(params.verbose)" == "true" ]] ; then
+          set -x
         fi
 
-        ALL_FIFLE=$(git ls-files |
-        git check-attr --stdin linguist-generated | grep -Ev ': (set|true)$' | cut -d: -f1 |
-        git check-attr --stdin linguist-vendored | grep -Ev ': (set|true)$' | cut -d: -f1 |
-        grep -Ev '^(vendor/|third_party/|.git)' |
-        grep -v '\.ai$')
+        cd $(workspaces.source.path)
 
-        echo 'Running github.com/client9/misspell ...'
-        # Don't fail because of misspell
-        echo $ALL_FIFLE |
-        xargs misspell -i importas -error
-
-        echo 'Running EOF newline check ...'
-        errorCount=0
-        for x in $ALL_FIFLE; do
-          # Based on https://stackoverflow.com/questions/34943632/linux-check-if-there-is-an-empty-line-at-the-end-of-a-file
-          if [[ -f $x && ! ( -s "$x" && -z "$(tail -c 1 $x)" ) ]]; then
-            ((errorCount++))
-            echo $x:$((1 + $(wc -l $x | tr -s ' ' | cut -d' ' -f 1))): Missing newline
+        {{- include "reviewdog.initscript" .| nindent 8 }}
+        golangci-lint version
+        echo 'Running golangci-lint ...'
+        if [ -f .golangci.yaml ]; then
+          set +e
+          golangci-lint run |
+          reviewdog -f=golangci-lint \
+                -name="Golangci-lint" \
+                -reporter="$(params.reporter)" \
+                -filter-mode="diff_context" \
+                -fail-on-error="true" \
+                -level="error"
+          if [ "$?" -gt 0 ]; then
+            exit 1
           fi
-        done
-
-        if [ "$errorCount" -gt 0 ]; then
-          exit 1
         fi
 
         echo "Everything seems to be fine"

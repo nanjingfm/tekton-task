@@ -1,26 +1,33 @@
 apiVersion: tekton.dev/v1beta1
 kind: {{ .Values.task.kind }}
 metadata:
-  name: gotest-withtag
+  name: {{ .Values.task.prefix }}gotest-withbuildtag
   namespace: {{ default "katanomi" .Values.task.namespace }}
+  annotations:
+    tekton.dev/categories: "Continuous Integration"
+    tekton.dev/displayName: "Go test with build tag"
 spec:
   workspaces:
-    - description: The git repo will be cloned onto the volume backing this workspace
+    - description: The workspace with source code
       name: source
   params:
     - name: tools-image
       description: "image used to run commands"
       default: {{ .Values.task.image | quote }}
+    - name: verbose
+      default: "false"
+      description: log the commands used during execution
+      type: string
   steps:
-    - name: check
+    - name: go-test-with-build-tag
       image: $(params.tools-image)
-      env:
-        - name: GOPRIVATE
-          value: "github.com/katanomi/*"
       script: |
         #!/bin/bash
         set -eu
-
+        if [[ "$(params.verbose)" == "true" ]] ; then
+          set -x
+        fi
+        {{- .Values.task.setupGoEnv | nindent 8 }}
         cd $(workspaces.source.path)
 
         tags="$(grep -I  -r '// +build' . | \

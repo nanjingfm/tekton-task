@@ -1,36 +1,53 @@
 apiVersion: tekton.dev/v1beta1
 kind: {{ .Values.task.kind }}
 metadata:
-  name: donotsubmit-check
+  name: {{ .Values.task.prefix }}donotsubmit
   namespace: {{ default "katanomi" .Values.task.namespace }}
+  annotations:
+    tekton.dev/categories: "Continuous Integration"
+    tekton.dev/displayName: "DoNotSubmit check"
 spec:
   params:
     - name: tools-image
       description: "image used to run commands"
       default: {{ .Values.task.image | quote }}
+    - name: verbose
+      default: "false"
+      description: log the commands used during execution
+      type: string
+    {{- include "reviewdog.params" . | nindent 4 }}
   workspaces:
-    - description: The git repo will be cloned onto the volume backing this workspace
+    - description: The workspace with source code
       name: source
   steps:
-    - name: check
+    - name: donotsubmit-check
       image: $(params.tools-image)
       script: |
         #!/bin/bash
         set -u
+        if [[ "$(params.verbose)" == "true" ]] ; then
+          set -x
+        fi
 
         cd $(workspaces.source.path)
 
-        set +e
-        out=$(find . -type f \
+        {{- include "reviewdog.initscript" .| nindent 8 }}
+
+        find . -type f \
           -not -path './vendor/*' \
           -not -path './third_party/*' \
           -not -path './.git/*' \
           -not -path './.build/*' \
           -not -path './.github/*' |
-        xargs grep -n "DO NOT SUBMIT")
+        xargs grep -n "DO NOT SUBMIT" |
+        reviewdog -efm="%f:%l:%m" \
+              -name="DO NOT SUBMIT" \
+              -reporter="$(params.reporter)" \
+              -filter-mode="added" \
+              -fail-on-error="true" \
+              -level="error"
 
-        if [ ! -z "$out" ]; then
-          echo "$out"
+        if [ "$?" -gt 0 ]; then
           exit 1
         fi
 

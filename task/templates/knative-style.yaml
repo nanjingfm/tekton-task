@@ -1,0 +1,113 @@
+apiVersion: tekton.dev/v1beta1
+kind: {{ .Values.task.kind }}
+metadata:
+  name: {{ .Values.task.prefix }}knative-style
+  namespace: {{ default "katanomi" .Values.task.namespace }}
+  annotations:
+    tekton.dev/categories: "Continuous Integration"
+    tekton.dev/displayName: "Knative style"
+spec:
+  params:
+    - name: tools-image
+      type: string
+      description: "image used to run commands"
+      default: {{ .Values.task.image | quote }}
+    - name: ignore-filetypes
+      type: string
+      description: "Directories that don't need to be checked"
+      default: '(\.ai|\.png|\.jpeg|\.jpg|\.drawio)$'
+    - name: ignore-dirs
+      type: string
+      description: "Directories that don't need to be checked"
+      default: '^(vendor/|third_party/|.git)'
+    - name: verbose
+      default: "false"
+      description: log the commands used during execution
+      type: string
+    {{- include "reviewdog.params" . | nindent 4 }}
+  workspaces:
+    - description: The workspace with source code
+      name: source
+  steps:
+    - name: code-style-check
+      image: $(params.tools-image)
+      script: |
+        #!/bin/bash
+        set -u
+        if [[ "$(params.verbose)" == "true" ]] ; then
+          set -x
+        fi
+        errorCount=0
+        cd $(workspaces.source.path)
+
+        {{- include "reviewdog.initscript" .| nindent 8 }}
+
+        ALL_FILE=$(git ls-files |
+        git check-attr --stdin linguist-generated | grep -Ev ': (set|true)$' | cut -d: -f1 |
+        git check-attr --stdin linguist-vendored | grep -Ev ': (set|true)$' | cut -d: -f1 |
+        grep -Ev '$(params.ignore-filetypes)' |
+        grep -Ev '$(params.ignore-dirs)')
+
+        echo 'Running github.com/client9/misspell check ...'
+        echo "$ALL_FILE" |
+        xargs misspell -i importas -error |
+        reviewdog -efm="%f:%l:%c: %m" \
+            -name="github.com/client9/misspell" \
+            -reporter="$(params.reporter)" \
+            -filter-mode="added" \
+            -fail-on-error="true" \
+            -level="error"
+        if [ "$?" -gt 0 ]; then
+          let errorCount+=1
+        fi
+
+        echo 'Running EOF newline check ...'
+        for x in $ALL_FILE; do
+          # Based on https://stackoverflow.com/questions/34943632/linux-check-if-there-is-an-empty-line-at-the-end-of-a-file
+          if [[ -f $x && ! ( -s "$x" && -z "$(tail -c 1 $x)" ) ]]; then
+            echo $x:$((1 + $(wc -l $x | awk '{print $1}'))): Missing newline
+            let errorCount+=1
+          fi
+        done|
+        reviewdog -efm="%f:%l: %m" \
+              -name="EOF Newline" \
+              -reporter="$(params.reporter)" \
+              -filter-mode="added" \
+              -fail-on-error="true" \
+              -level="error"
+        if [ "$?" -gt 0 ]; then
+          let errorCount+=1
+        fi
+
+        echo 'Running trailing whitespace check ...'
+        # Don't fail, because grep will return error code 123 when all files are ok
+        out=$(echo "$ALL_FILE" |
+        xargs grep -nP "\ +$")
+
+        if [ ! -z "$out" ]; then
+          echo "$out"
+          let errorCount+=1
+        fi
+
+        echo "Running woke check ..."
+        if [ ! -f .wokeignore ]; then
+          cat > .wokeignore <<EOF
+        .golangci.yaml
+        vendor/*
+        third_party/*
+        EOF
+        fi
+
+        woke --exit-1-on-failure --output simple |
+        reviewdog -efm="%f:%l:%c: %m" \
+                -name="woke" \
+                -reporter="$(params.reporter)" \
+                -filter-mode="added" \
+                -fail-on-error="true" \
+                -level="error"
+
+        if [ "$errorCount" -gt 0 ]; then
+          exit 1
+        fi
+
+        echo "Everything seems to be fine"
