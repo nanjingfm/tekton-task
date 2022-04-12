@@ -1,0 +1,92 @@
+apiVersion: tekton.dev/v1beta1
+kind: {{ .Values.task.kind }}
+metadata:
+  name: {{ .Values.task.prefix }}git-clone
+  namespace: {{ default "katanomi" .Values.task.namespace }}
+  annotations:
+    tekton.dev/categories: "Continuous Integration"
+spec:
+  params:
+    - description: git url to clone
+      name: url
+      type: string
+    - description: git revision to checkout (branch, tag, sha, ref…)
+      name: revision
+      type: string
+    - default: ""
+      description: (optional) git refspec to fetch before checking out revision
+      name: refspec
+      type: string
+    - default: "1"
+      description: performs a shallow clone where only the most recent commit(s)
+        will be fetched
+      name: depth
+      type: string
+    - default: "false"
+      description: log the commands used during execution
+      name: verbose
+      type: string
+    - name: tools-image
+      description: "image used to run commands"
+      default: {{ .Values.task.image | quote }}
+  results:
+    - description: The precise commit SHA that was fetched by this Task
+      name: commit-id
+    - description: The precise commit short SHA that was fetched by this Task
+      name: commit-short-id
+    - description: The precise URL that was fetched by this Task
+      name: url
+  workspaces:
+    - description: The git repo will be cloned onto the volume backing this workspace
+      name: source
+  steps:
+    - name: clone-source-code
+      image: $(params.tools-image)
+      resources: { }
+      script: |
+        #!/bin/bash
+        set -eu -o pipefail
+        if [[ "$(params.verbose)" == "true" ]] ; then
+          set -x
+        fi
+
+        CHECKOUT_DIR=$(workspaces.source.path)
+
+        cleandir() {
+          # Delete any existing contents of the repo directory if it exists.
+          #
+          # We don't just "rm -rf ${CHECKOUT_DIR}" because ${CHECKOUT_DIR} might be "/"
+          # or the root of a mounted volume.
+          if [ -d "${CHECKOUT_DIR}" ] ; then
+            # Delete non-hidden files and directories
+            rm -rf "${CHECKOUT_DIR:?}"/*
+            # Delete files and directories starting with . but excluding ..
+            rm -rf "${CHECKOUT_DIR}"/.[!.]*
+            # Delete files and directories starting with .. plus any other character
+            rm -rf "${CHECKOUT_DIR}"/..?*
+          fi
+        }
+
+        # prevent error when retry
+        cleandir
+
+        /ko-app/git-init \
+          -url "$(params.url)" \
+          -revision "$(params.revision)" \
+          -refspec "$(params.refspec)" \
+          -path "$CHECKOUT_DIR" \
+          -sslVerify="true" \
+          -submodules="true" \
+          -depth "$(params.depth)"
+
+        cd "$CHECKOUT_DIR"
+        RESULT_SHA="$(git rev-parse HEAD)"
+        EXIT_CODE="$?"
+        if [ "$EXIT_CODE" != 0 ] ; then
+          exit $EXIT_CODE
+        fi
+
+        # ensure we don't add a trailing newline to the result
+        echo -n "$RESULT_SHA" > $(results.commit-id.path)
+        echo -n "${RESULT_SHA:0:8}" >  $(results.commit-short-id.path)
+        echo -n "$(params.url)" > $(results.url.path)

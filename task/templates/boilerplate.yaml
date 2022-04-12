@@ -1,0 +1,71 @@
+apiVersion: tekton.dev/v1beta1
+kind: {{ .Values.task.kind }}
+metadata:
+  name: {{ .Values.task.prefix }}boilerplate
+  namespace: {{ default "katanomi" .Values.task.namespace }}
+  annotations:
+    tekton.dev/categories: "Continuous Integration"
+    tekton.dev/displayName: "Boilerplate check"
+spec:
+  params:
+    - name: filetypes
+      type: string
+      default: "go,sh"
+      description: "The extension of files that should match this boilerplate"
+    - name: tools-image
+      description: "image used to run commands"
+      default: {{ .Values.task.image | quote }}
+    - name: exclude
+      description: "This is a regular expression of paths to exclude"
+      default: '(vendor|third_party)/'
+    - name: verbose
+      default: "false"
+      description: log the commands used during execution
+      type: string
+    {{- include "reviewdog.params" . | nindent 4 }}
+  workspaces:
+    - description: The workspace with source code
+      name: source
+  steps:
+    - name: boilerplate-check
+      image: $(params.tools-image)
+      script: |
+        #!/bin/bash
+        set -u
+        if [[ "$(params.verbose)" == "true" ]] ; then
+          set -x
+        fi
+
+        cd $(workspaces.source.path)
+
+        {{- include "reviewdog.initscript" .| nindent 8 }}
+
+        filetypeOption=$(params.filetypes)
+        filetypes=(${filetypeOption//,/ })
+
+        errorCount=0
+        for filetype in ${filetypes[@]}; do
+          if [ -f ./hack/boilerplate.${filetype}.txt ]; then
+            echo "Running github.com/mattmoor/boilerplate-check for ${filetype} ..."
+            # Don't fail because of boilerplate-check
+            set +o pipefail
+            boilerplate-check check \
+              --boilerplate ./hack/boilerplate.${filetype}.txt \
+              --file-extension ${filetype} \
+              --exclude '$(params.exclude)' |
+            reviewdog -efm="%A%f:%l: %m" \
+                -efm="%C%.%#" \
+                -name="${filetype} headers" \
+                -reporter="$(params.reporter)" \
+                -filter-mode="nofilter" \
+                -fail-on-error="true" \
+                -level="error"
+            if [ "$?" -gt 0 ]; then
+              let errorCount+=1
+            fi
+          fi
+        done
+
+        if [ $errorCount -gt 0 ]; then exit 1; fi
+        echo "Everything seems to be fine"
+

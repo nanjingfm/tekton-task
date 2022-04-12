@@ -1,0 +1,51 @@
+apiVersion: tekton.dev/v1beta1
+kind: {{ .Values.task.kind }}
+metadata:
+  name: {{ .Values.task.prefix }}go-style
+  namespace: {{ default "katanomi" .Values.task.namespace }}
+  annotations:
+    tekton.dev/categories: "Continuous Integration"
+    tekton.dev/displayName: "Go Style"
+spec:
+  params:
+    - name: tools-image
+      description: "image used to run commands"
+      default: {{ .Values.task.image | quote }}
+    - name: verbose
+      default: "false"
+      description: log the commands used during execution
+      type: string
+    {{- include "reviewdog.params" . | nindent 4 }}
+  workspaces:
+    - description: The workspace with source code
+      name: source
+  steps:
+    - name: go-code-style-check
+      image: $(params.tools-image)
+      script: |
+        #!/bin/bash
+        set -eu
+        if [[ "$(params.verbose)" == "true" ]] ; then
+          set -x
+        fi
+
+        cd $(workspaces.source.path)
+
+        {{- include "reviewdog.initscript" .| nindent 8 }}
+        golangci-lint version
+        echo 'Running golangci-lint ...'
+        if [ -f .golangci.yaml ]; then
+          set +e
+          golangci-lint run |
+          reviewdog -f=golangci-lint \
+                -name="Golangci-lint" \
+                -reporter="$(params.reporter)" \
+                -filter-mode="diff_context" \
+                -fail-on-error="true" \
+                -level="error"
+          if [ "$?" -gt 0 ]; then
+            exit 1
+          fi
+        fi
+
+        echo "Everything seems to be fine"

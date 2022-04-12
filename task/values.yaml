@@ -1,0 +1,6 @@
+task:
+  prefix: "katanomi-"
+  kind: ClusterTask
+  namespace: katanomi
+  image: registry.alauda.cn:60080/fundamentals/katanomi-ci-builder:v0.0.3
+  setupGoEnv: |

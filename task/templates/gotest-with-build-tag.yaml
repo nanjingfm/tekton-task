@@ -1,0 +1,43 @@
+apiVersion: tekton.dev/v1beta1
+kind: {{ .Values.task.kind }}
+metadata:
+  name: {{ .Values.task.prefix }}gotest-withbuildtag
+  namespace: {{ default "katanomi" .Values.task.namespace }}
+  annotations:
+    tekton.dev/categories: "Continuous Integration"
+    tekton.dev/displayName: "Go test with build tag"
+spec:
+  workspaces:
+    - description: The workspace with source code
+      name: source
+  params:
+    - name: tools-image
+      description: "image used to run commands"
+      default: {{ .Values.task.image | quote }}
+    - name: verbose
+      default: "false"
+      description: log the commands used during execution
+      type: string
+  steps:
+    - name: go-test-with-build-tag
+      image: $(params.tools-image)
+      script: |
+        #!/bin/bash
+        set -eu
+        if [[ "$(params.verbose)" == "true" ]] ; then
+          set -x
+        fi
+        {{- .Values.task.setupGoEnv | nindent 8 }}
+        cd $(workspaces.source.path)
+
+        tags="$(grep -I  -r '// +build' . | \
+          grep -v '^./vendor/' | \
+          grep -v '^./hack/' | \
+          grep -v '^./third_party' | \
+          cut -f3 -d' ' | \
+          sort | uniq | \
+          grep -v '^!' | \
+          tr '\n' ' ')"
+
+        echo "Building with tags: ${tags}"
+        go test -vet=off -tags "${tags}" ./...

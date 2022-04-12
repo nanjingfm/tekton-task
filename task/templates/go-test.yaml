@@ -1,0 +1,40 @@
+apiVersion: tekton.dev/v1beta1
+kind: {{ .Values.task.kind }}
+metadata:
+  name: {{ .Values.task.prefix }}gotest
+  namespace: {{ default "katanomi" .Values.task.namespace }}
+  annotations:
+    tekton.dev/categories: "Continuous Integration"
+    tekton.dev/displayName: "Go test"
+spec:
+  workspaces:
+    - description: The workspace with source code
+      name: source
+  params:
+    - name: tools-image
+      description: "image used to run commands"
+      default: {{ .Values.task.image | quote }}
+    - name: verbose
+      default: "false"
+      description: log the commands used during execution
+      type: string
+  results:
+    - name: coverage
+      description: The coverage of test code
+  steps:
+    - name: go-test
+      image: $(params.tools-image)
+      script: |
+        #!/bin/bash
+        set -eu
+        if [[ "$(params.verbose)" == "true" ]] ; then
+          set -x
+        fi
+        {{- .Values.task.setupGoEnv | nindent 8 }}
+        cd $(workspaces.source.path)
+
+        go test -coverprofile cover.out ./...
+        go tool cover -func cover.out |
+        tail -n1 |
+        grep -P '\d+\.\d+' -o |
+        tee $(results.coverage.path)
