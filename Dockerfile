@@ -1,5 +1,5 @@
 FROM registry.alauda.cn:60080/devops/builder-go:1.17.6-ubuntu-12 as builder
-RUN mkdir -p /build-tools/bin
+RUN mkdir -p /build-tools/bin /build-tools/lib
 WORKDIR /build-tools
 RUN set -eux; \
     curl -sfL https://raw.githubusercontent.com/reviewdog/reviewdog/master/install.sh | sh -s -- -b ./bin 2>&1; \
@@ -26,7 +26,17 @@ RUN set -eux; \
     cp "$(go env GOPATH)/bin/misspell" ./bin; \
     cp "$(go env GOPATH)/bin/boilerplate-check" ./bin; \
     echo "Installing success..."
+RUN set -eux; \
+    apt-get update; \
+    apt-get -y install rsync; \
+    cp "$(which rsync)" ./bin; \
+    lib_path=$(ls /usr/lib/ | grep linux-gnu | awk '{print "/usr/lib/"$1}'); \
+    ls "${lib_path}" | grep libpopt | xargs -I EE cp "${lib_path}/EE" ./lib;
 
 FROM registry.alauda.cn:60080/devops/builder-go:1.17.6-ubuntu-12
 COPY --from=builder /build-tools/bin /build-tools/bin/
+COPY --from=builder /build-tools/lib /build-tools/lib/
+RUN set -eux; \
+    lib_path=$(ls /usr/lib/ | grep linux-gnu | awk '{print "/usr/lib/"$1}'); \
+    mv /build-tools/lib/* "${lib_path}"
 ENV PATH /build-tools/bin:$PATH
